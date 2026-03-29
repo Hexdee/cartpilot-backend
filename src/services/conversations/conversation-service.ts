@@ -1,0 +1,450 @@
+import { createId } from "@/lib/ids";
+import { formatCurrency } from "@/domain/catalog";
+import { Store } from "@/store/store";
+import { AiProvider } from "@/services/ai/ai-provider";
+import { SearchService } from "@/services/search/search-service";
+import { ChannelReplyService } from "@/services/channels/channel-reply-service";
+import { OutboundMessageService } from "@/services/channels/outbound-message-service";
+import { ChannelType, RankingMode, SearchIntent, SearchSession } from "@/domain/types";
+import { DeepLinkService } from "@/services/auth/deep-link-service";
+
+export class ConversationService {
+  constructor(
+    private readonly store: Store,
+    private readonly aiProvider: AiProvider,
+    private readonly searchService: SearchService,
+    private readonly channelReplyService: ChannelReplyService,
+    private readonly outboundMessageService: OutboundMessageService,
+    private readonly deepLinkService: DeepLinkService,
+  ) {}
+
+  async handleInboundMessage(input: {
+    channel: ChannelType;
+    externalUserId: string;
+    message: string;
+    displayName?: string;
+  }) {
+    const conversationSession = await this.store.getOrCreateConversationSession(
+      input.channel,
+      input.externalUserId,
+      input.displayName,
+    );
+
+    const command = this.parseCommand(input.message);
+    if (command) {
+      return this.handleCommand({
+        ...input,
+        conversationSessionId: conversationSession.id,
+        command,
+      });
+    }
+
+    return this.runSearchFlow({
+      ...input,
+      conversationSessionId: conversationSession.id,
+      message: input.message,
+    });
+  }
+
+  private async handleCommand(input: {
+    channel: ChannelType;
+    externalUserId: string;
+    displayName?: string;
+    conversationSessionId: string;
+    command: { name: string; args: string };
+  }) {
+    const { name, args } = input.command;
+
+    switch (name) {
+      case "start":
+        return this.sendPlainText(
+          input.channel,
+          input.externalUserId,
+          [
+            "Welcome to CartPilot Bot, the Telegram assistant for CartPilot.",
+            "",
+            "CartPilot is a concierge shopping assistant that helps you search across supported stores, compare delivery speed and pricing, choose the offer you want, and continue to checkout or tracking from one place.",
+            "",
+            "Start here:",
+            "/search <product>  Search for a product across supported stores",
+            "/track  Check the latest status of your most recent order",
+            "/wallet  View your CartPilot wallet balance",
+            "",
+            "Use /help to see all available commands with examples.",
+          ].join("\n"),
+        );
+      case "help":
+        return this.sendPlainText(
+          input.channel,
+          input.externalUserId,
+          [
+            "CartPilot Bot commands",
+            "",
+            "/search <product>",
+            "Search for a product across supported stores and return the best matching offers.",
+            "Example: /search Sony WH-1000XM5",
+            "",
+            "/deal <product>",
+            "Search and rank the results by the cheapest delivered total.",
+            "Example: /deal air fryer under 150000",
+            "",
+            "/fast <product>",
+            "Search and rank the results by the fastest delivery option.",
+            "Example: /fast office chair",
+            "",
+            "/rated <product>",
+            "Search and rank the results by the strongest customer rating.",
+            "Example: /rated portable blender",
+            "",
+            "/more",
+            "Show the next set of offers from your latest search.",
+            "Example: /more",
+            "",
+            "/results",
+            "Open the latest full comparison page in the web app.",
+            "Example: /results",
+            "",
+            "/track",
+            "Show tracking for your latest order.",
+            "Example: /track",
+            "",
+            "/wallet",
+            "Show your CartPilot wallet balance and funding network.",
+            "Example: /wallet",
+            "",
+            "You can also send a plain product request without a command, such as: need a fast blender under 120000 naira",
+          ].join("\n"),
+        );
+      case "search":
+        if (!args) {
+          return this.sendPlainText(
+            input.channel,
+            input.externalUserId,
+            "Usage: /search Sony WH-1000XM5 headphones",
+          );
+        }
+
+        return this.runSearchFlow({
+          ...input,
+          message: args,
+        });
+      case "deal":
+      case "fast":
+      case "rated":
+        if (!args) {
+          return this.sendPlainText(
+            input.channel,
+            input.externalUserId,
+            `Usage: /${name} <product>`,
+          );
+        }
+
+        return this.runSearchFlow({
+          ...input,
+          message: args,
+          rankingModeOverride:
+            name === "deal"
+              ? "lowest_total_price"
+              : name === "fast"
+                ? "fastest_delivery"
+                : "highest_rating",
+        });
+      case "results": {
+        const sessions = await this.store.listSearchSessionsForIdentity(
+          input.channel,
+          input.externalUserId,
+        );
+        const latest = sessions[0];
+
+        if (!latest) {
+          return this.sendPlainText(
+            input.channel,
+            input.externalUserId,
+            "No recent search yet. Send a product request or use /search <product> first.",
+          );
+        }
+
+        const reply = this.channelReplyService.buildSearchReply(input.channel, latest);
+        await this.outboundMessageService.sendSearchReply(
+          input.channel,
+          input.externalUserId,
+          reply,
+        );
+
+        return { reply };
+      }
+      case "more": {
+        const sessions = await this.store.listSearchSessionsForIdentity(
+          input.channel,
+          input.externalUserId,
+        );
+        const latest = sessions[0];
+
+        if (!latest) {
+          return this.sendPlainText(
+            input.channel,
+            input.externalUserId,
+            "No recent search yet. Send a product request or use /search <product> first.",
+          );
+        }
+
+        const requestedPage = Number.parseInt(args, 10);
+        const page = Number.isFinite(requestedPage) && requestedPage > 1 ? requestedPage : 2;
+        return this.sendSearchPage(input.channel, input.externalUserId, latest.id, page);
+      }
+      case "track": {
+        const orders = await this.store.listOrdersForIdentity(input.channel, input.externalUserId);
+        const latest = orders[0];
+
+        if (!latest) {
+          return this.sendPlainText(
+            input.channel,
+            input.externalUserId,
+            "No active order yet. Once you complete checkout, /track will return your latest order status.",
+          );
+        }
+
+        const tracking = await this.store.getTrackingEvents(latest.publicOrderId);
+        const reply = await this.channelReplyService.buildTrackingReply(latest, tracking);
+        await this.outboundMessageService.sendTrackingUpdate(
+          input.channel,
+          input.externalUserId,
+          reply,
+        );
+
+        return { reply };
+      }
+      case "wallet": {
+        const wallet = await this.store.getWallet(input.channel, input.externalUserId);
+        return this.sendPlainText(
+          input.channel,
+          input.externalUserId,
+          [
+            "CartPilot Wallet",
+            `${wallet.assetSymbol} on ${wallet.network}`,
+            `Available balance: ${formatCurrency(wallet.availableBalance)}`,
+            wallet.pendingBalance > 0
+              ? `Pending balance: ${formatCurrency(wallet.pendingBalance)}`
+              : null,
+            `Wallet address: ${wallet.walletAddress}`,
+            "",
+            "You can fund this wallet and use it during checkout when your balance covers the full order total.",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+      }
+      default:
+        return this.sendPlainText(
+          input.channel,
+          input.externalUserId,
+          "Unknown command. Use /help to see the supported bot commands.",
+        );
+    }
+  }
+
+  async handleTelegramCallback(input: {
+    externalUserId: string;
+    callbackQueryId: string;
+    data: string;
+    displayName?: string;
+  }) {
+    const [action, searchSessionId, rawPage] = input.data.split(":");
+
+    if (action === "more" && searchSessionId) {
+      const page = Number.parseInt(rawPage ?? "2", 10);
+      const result = await this.sendSearchPage(
+        "telegram",
+        input.externalUserId,
+        searchSessionId,
+        Number.isFinite(page) && page > 1 ? page : 2,
+      );
+      await this.outboundMessageService.answerTelegramCallbackQuery(
+        input.callbackQueryId,
+        "Loaded more offers.",
+      );
+      return result;
+    }
+
+    if (action === "choose" && searchSessionId && rawPage) {
+      const result = await this.handleOfferSelection(
+        input.externalUserId,
+        searchSessionId,
+        rawPage,
+      );
+      await this.outboundMessageService.answerTelegramCallbackQuery(
+        input.callbackQueryId,
+        result ? "Offer selected." : "Offer not found.",
+      );
+      return result;
+    }
+
+    await this.outboundMessageService.answerTelegramCallbackQuery(
+      input.callbackQueryId,
+      "That action is not supported yet.",
+    );
+    return null;
+  }
+
+  private async runSearchFlow(input: {
+    channel: ChannelType;
+    externalUserId: string;
+    displayName?: string;
+    conversationSessionId: string;
+    message: string;
+    rankingModeOverride?: RankingMode;
+  }) {
+    const parsed = await this.aiProvider.parseSearchIntent(input.message, [input.message]);
+    const intent: SearchIntent = input.rankingModeOverride
+      ? { ...parsed, rankingMode: input.rankingModeOverride }
+      : parsed;
+    const result = await this.searchService.search(intent);
+    const searchSession: SearchSession = {
+      id: createId("search"),
+      conversationSessionId: input.conversationSessionId,
+      channel: input.channel,
+      intent,
+      offers: result.offers,
+      explanation: result.explanation,
+      createdAt: new Date().toISOString(),
+    };
+
+    await this.store.createSearchSession(searchSession);
+    const reply = this.channelReplyService.buildSearchReply(input.channel, searchSession);
+    await this.outboundMessageService.sendSearchReply(input.channel, input.externalUserId, reply);
+
+    return {
+      searchSession,
+      reply,
+    };
+  }
+
+  private parseCommand(message: string) {
+    const normalized = message.trim();
+    if (!normalized.startsWith("/")) return null;
+
+    const [rawName, ...rest] = normalized.split(/\s+/);
+    const name = rawName.slice(1).split("@")[0]?.toLowerCase();
+
+    if (!name) return null;
+
+    return {
+      name,
+      args: rest.join(" ").trim(),
+    };
+  }
+
+  private async sendPlainText(channel: ChannelType, externalUserId: string, text: string) {
+    await this.outboundMessageService.sendText(channel, externalUserId, text);
+    return {
+      reply: {
+        summary: text,
+        topOffers: [],
+        webLinks: {
+          results: "",
+        },
+      },
+    };
+  }
+
+  private async sendSearchPage(
+    channel: ChannelType,
+    externalUserId: string,
+    searchSessionId: string,
+    page: number,
+  ) {
+    const searchSession = await this.store.getSearchSession(searchSessionId);
+
+    if (!searchSession) {
+      return this.sendPlainText(
+        channel,
+        externalUserId,
+        "I could not find that search session anymore. Please run the search again.",
+      );
+    }
+
+    const reply = this.channelReplyService.buildSearchReply(channel, searchSession, {
+      page,
+      pageSize: 3,
+    });
+
+    if (reply.topOffers.length === 0) {
+      return this.sendPlainText(
+        channel,
+        externalUserId,
+        "No more offers in that result set. Use /results to reopen the full comparison page.",
+      );
+    }
+
+    await this.outboundMessageService.sendSearchReply(channel, externalUserId, reply);
+    return { reply, searchSession };
+  }
+
+  private async handleOfferSelection(
+    externalUserId: string,
+    searchSessionId: string,
+    offerId: string,
+  ) {
+    const searchSession = await this.store.getSearchSession(searchSessionId);
+
+    if (!searchSession) {
+      await this.sendPlainText(
+        "telegram",
+        externalUserId,
+        "I could not find that search anymore. Please run the search again.",
+      );
+      return null;
+    }
+
+    const offer = searchSession.offers.find((entry) => entry.id === offerId);
+    if (!offer) {
+      await this.sendPlainText(
+        "telegram",
+        externalUserId,
+        "That offer is no longer available in this result set.",
+      );
+      return null;
+    }
+
+    const checkoutSessionId = `checkout_${Date.now()}`;
+    await this.store.createCheckoutSession({
+      id: checkoutSessionId,
+      searchSessionId: searchSession.id,
+      offerId: offer.id,
+      expiresAt: new Date(Date.now() + 1000 * 60 * 60).toISOString(),
+      channel: "telegram",
+      payload: {
+        source: "telegram_offer_selection",
+      },
+      createdAt: new Date().toISOString(),
+    });
+
+    const wallet = await this.store.getWallet("telegram", externalUserId);
+    const platformFee = Math.max(3900, Math.round(offer.totalCost * 0.014));
+    const checkoutUrl = this.deepLinkService.checkoutLink(checkoutSessionId);
+    const walletCheckoutUrl =
+      wallet.availableBalance >= offer.totalCost + platformFee
+        ? this.deepLinkService.checkoutLinkWithOptions(checkoutSessionId, {
+            payment: "wallet",
+          })
+        : undefined;
+
+    await this.outboundMessageService.sendTelegramOfferSelection(externalUserId, {
+      summary: [
+        `Selected: ${offer.merchant}`,
+        `${offer.title}`,
+        `${formatCurrency(offer.totalCost)} • ${offer.etaLabel} • ${offer.rating.toFixed(1)} rating`,
+        "",
+        "Choose how you want to continue.",
+      ].join("\n"),
+      checkoutUrl,
+      walletCheckoutUrl,
+      resultsUrl: this.deepLinkService.resultsLink(searchSession),
+    });
+
+    return {
+      offer,
+      checkoutSessionId,
+    };
+  }
+}

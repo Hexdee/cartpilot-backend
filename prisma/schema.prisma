@@ -1,0 +1,220 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ChannelType {
+  whatsapp
+  telegram
+  web
+}
+
+enum OrderStatus {
+  pending_payment
+  paid
+  awaiting_admin_order
+  ordered_on_merchant
+  merchant_processing
+  shipped
+  out_for_delivery
+  delivered
+  issue_reported
+  cancelled
+  refunded
+}
+
+enum WalletTransactionType {
+  topup
+  order_payment
+  refund
+}
+
+enum WalletTransactionStatus {
+  pending
+  completed
+  failed
+}
+
+model ChannelIdentity {
+  id            String              @id
+  channel       ChannelType
+  externalId    String
+  displayName   String?
+  createdAt     DateTime
+  updatedAt     DateTime
+
+  sessions        ConversationSession[]
+  profile         CustomerProfile?
+  paymentMethods  SavedPaymentMethod[]
+  savedAddresses  SavedAddress[]
+  wallet          CustomerWallet?
+
+  @@unique([channel, externalId])
+}
+
+model ConversationSession {
+  id                String   @id
+  channelIdentityId String
+  channel           ChannelType
+  lastMessageAt     DateTime
+  createdAt         DateTime
+  updatedAt         DateTime
+
+  channelIdentity ChannelIdentity @relation(fields: [channelIdentityId], references: [id], onDelete: Cascade)
+  searchSessions  SearchSession[]
+}
+
+model SearchSession {
+  id                    String   @id
+  conversationSessionId String
+  query                 String
+  rankingMode           String
+  productKey            String
+  budget                Int?
+  color                 String?
+  explanation           String
+  offerSnapshot         Json
+  createdAt             DateTime
+
+  conversationSession ConversationSession @relation(fields: [conversationSessionId], references: [id], onDelete: Cascade)
+  checkoutSessions   CheckoutSession[]
+  orders             Order[]
+}
+
+model CheckoutSession {
+  id              String   @id
+  searchSessionId String
+  offerId         String
+  channel         ChannelType
+  expiresAt       DateTime
+  payload         Json
+  createdAt       DateTime
+
+  searchSession SearchSession @relation(fields: [searchSessionId], references: [id], onDelete: Cascade)
+  orders        Order[]
+}
+
+model Order {
+  id                  String      @id
+  publicOrderId       String      @unique
+  checkoutSessionId   String
+  searchSessionId     String
+  offerId             String
+  channel             ChannelType
+  recipientExternalId String?
+  status              OrderStatus
+  paymentMethod       String
+  feeAmount           Int
+  totalAmount         Int
+  paymentReference    String
+  merchantOrderReference String?
+  customerPayload     Json
+  createdAt           DateTime
+  updatedAt           DateTime
+
+  checkoutSession CheckoutSession @relation(fields: [checkoutSessionId], references: [id], onDelete: Cascade)
+  searchSession   SearchSession   @relation(fields: [searchSessionId], references: [id], onDelete: Cascade)
+  trackingEvents  TrackingEvent[]
+  adminActions    AdminAction[]
+}
+
+model TrackingEvent {
+  id        String      @id
+  orderDbId String
+  status    OrderStatus
+  title     String
+  detail    String
+  createdAt DateTime
+
+  order Order @relation(fields: [orderDbId], references: [id], onDelete: Cascade)
+}
+
+model AdminAction {
+  id        String   @id
+  orderDbId String
+  action    String
+  actor     String
+  metadata  Json?
+  createdAt DateTime
+
+  order Order @relation(fields: [orderDbId], references: [id], onDelete: Cascade)
+}
+
+model CustomerProfile {
+  id                String   @id
+  channelIdentityId String   @unique
+  fullName          String
+  email             String
+  phone             String
+  city              String
+  address           String
+  createdAt         DateTime
+  updatedAt         DateTime
+
+  channelIdentity ChannelIdentity @relation(fields: [channelIdentityId], references: [id], onDelete: Cascade)
+}
+
+model SavedPaymentMethod {
+  id                String   @id
+  channelIdentityId String
+  brand             String
+  last4             String
+  expiry            String
+  isDefault         Boolean
+  createdAt         DateTime
+  updatedAt         DateTime
+
+  channelIdentity ChannelIdentity @relation(fields: [channelIdentityId], references: [id], onDelete: Cascade)
+}
+
+model SavedAddress {
+  id                String   @id
+  channelIdentityId String
+  label             String
+  fullName          String
+  phone             String
+  addressLine       String
+  city              String
+  note              String?
+  isDefault         Boolean
+  createdAt         DateTime
+  updatedAt         DateTime
+
+  channelIdentity ChannelIdentity @relation(fields: [channelIdentityId], references: [id], onDelete: Cascade)
+}
+
+model CustomerWallet {
+  id                String   @id
+  channelIdentityId String   @unique
+  assetSymbol       String
+  network           String
+  walletAddress     String
+  availableBalance  Int
+  pendingBalance    Int
+  lastUpdatedAt     DateTime
+  createdAt         DateTime
+  updatedAt         DateTime
+
+  channelIdentity ChannelIdentity    @relation(fields: [channelIdentityId], references: [id], onDelete: Cascade)
+  transactions    WalletTransaction[]
+}
+
+model WalletTransaction {
+  id            String                  @id
+  walletId      String
+  type          WalletTransactionType
+  status        WalletTransactionStatus
+  amount        Int
+  assetSymbol   String
+  network       String
+  reference     String
+  walletAddress String
+  note          String
+  createdAt     DateTime
+
+  wallet CustomerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+}

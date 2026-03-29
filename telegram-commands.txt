@@ -1,0 +1,10 @@
+start - Start CartPilot and show the command menu
+help - Show supported commands
+search - Search for a product across supported stores
+deal - Search for the cheapest matching offer
+fast - Search for the fastest delivery option
+rated - Search for the best rated option
+more - Show more offers from your latest search
+results - Open the latest comparison results
+track - Show tracking for your latest order
+wallet - Show your CartPilot wallet balance
