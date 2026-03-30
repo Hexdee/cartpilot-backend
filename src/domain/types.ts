@@ -88,6 +88,10 @@ export interface MerchantSearchSource {
   merchant: string;
   mode: MerchantSearchMode;
   resultCount: number;
+  filteredResultCount?: number;
+  normalizedResultCount?: number;
+  relevantResultCount?: number;
+  finalResultCount?: number;
   warnings?: string[];
   searchUrl?: string;
 }

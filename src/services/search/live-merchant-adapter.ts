@@ -4,6 +4,7 @@ import {
   getOfferSeed,
   seedSnapshotToRawOffer,
 } from "@/domain/catalog";
+import { renderSearchPageHtml } from "@/services/search/search-browser";
 import {
   MerchantRawOffer,
   MerchantSearchMode,
@@ -16,6 +17,8 @@ export type LiveMerchantAdapterConfig = {
   merchant: string;
   mode: MerchantSearchMode;
   timeoutMs: number;
+  browserTimeoutMs?: number;
+  browserAutomationEnabled?: boolean;
   userAgent: string;
 };
 
@@ -23,12 +26,16 @@ export abstract class LiveMerchantAdapter implements MerchantAdapter {
   readonly merchant: string;
   readonly mode: MerchantSearchMode;
   protected readonly timeoutMs: number;
+  protected readonly browserTimeoutMs: number;
+  protected readonly browserAutomationEnabled: boolean;
   protected readonly userAgent: string;
 
   constructor(config: LiveMerchantAdapterConfig) {
     this.merchant = config.merchant;
     this.mode = config.mode;
     this.timeoutMs = config.timeoutMs;
+    this.browserTimeoutMs = config.browserTimeoutMs ?? Math.max(config.timeoutMs, 20000);
+    this.browserAutomationEnabled = config.browserAutomationEnabled ?? false;
     this.userAgent = config.userAgent;
   }
 
@@ -57,12 +64,37 @@ export abstract class LiveMerchantAdapter implements MerchantAdapter {
       const html = await response.text();
       const offers = this.parseHtml(html, searchUrl, request);
 
-      if (offers.length > 0 || this.mode === "live") {
+      if (offers.length > 0) {
         return {
           merchant: this.merchant,
           mode: "live",
           query: request.query,
           offers,
+          warnings: warnings.length ? warnings : undefined,
+          searchUrl,
+        };
+      }
+
+      const browserOffers = await this.tryBrowserAutomation(searchUrl, request, warnings);
+      if (browserOffers.length > 0) {
+        warnings.push(`Used browser automation fallback for ${this.merchant}.`);
+        return {
+          merchant: this.merchant,
+          mode: "live",
+          query: request.query,
+          offers: browserOffers,
+          warnings: warnings.length ? warnings : undefined,
+          searchUrl,
+        };
+      }
+
+      if (this.mode === "live") {
+        warnings.push(`No live ${this.merchant} offers were parsed.`);
+        return {
+          merchant: this.merchant,
+          mode: "live",
+          query: request.query,
+          offers: [],
           warnings: warnings.length ? warnings : undefined,
           searchUrl,
         };
@@ -128,6 +160,25 @@ export abstract class LiveMerchantAdapter implements MerchantAdapter {
     request: MerchantSearchRequest,
   ): MerchantRawOffer[];
 
+  protected parseBrowserSearchDocument(
+    $: ReturnType<typeof load>,
+    searchUrl: string,
+    request: MerchantSearchRequest,
+  ): MerchantRawOffer[] {
+    return this.parseSearchDocument($, searchUrl, request);
+  }
+
+  protected getBrowserAutomationSelector(_request: MerchantSearchRequest): string | null {
+    return null;
+  }
+
+  protected async searchWithBrowserAutomation(
+    _searchUrl: string,
+    _request: MerchantSearchRequest,
+  ): Promise<MerchantRawOffer[] | null> {
+    return null;
+  }
+
   protected createSeedResponse(request: MerchantSearchRequest): MerchantSearchResponse {
     return {
       merchant: this.merchant,
@@ -187,9 +238,12 @@ export abstract class LiveMerchantAdapter implements MerchantAdapter {
     html: string,
     searchUrl: string,
     request: MerchantSearchRequest,
+    options?: { browser?: boolean },
   ): MerchantRawOffer[] {
     const $ = load(html);
-    const offers = this.parseSearchDocument($, searchUrl, request);
+    const offers = options?.browser
+      ? this.parseBrowserSearchDocument($, searchUrl, request)
+      : this.parseSearchDocument($, searchUrl, request);
     const unique = new Map<string, MerchantRawOffer>();
 
     for (const offer of offers) {
@@ -200,6 +254,43 @@ export abstract class LiveMerchantAdapter implements MerchantAdapter {
     }
 
     return [...unique.values()];
+  }
+
+  private async tryBrowserAutomation(
+    searchUrl: string,
+    request: MerchantSearchRequest,
+    warnings: string[],
+  ) {
+    if (!this.browserAutomationEnabled) {
+      return [];
+    }
+
+    const waitForSelector = this.getBrowserAutomationSelector(request);
+    if (!waitForSelector) {
+      return [];
+    }
+
+    try {
+      const directOffers = await this.searchWithBrowserAutomation(searchUrl, request);
+      if (directOffers && directOffers.length > 0) {
+        return directOffers;
+      }
+
+      const browserHtml = await renderSearchPageHtml(searchUrl, {
+        timeoutMs: this.browserTimeoutMs,
+        userAgent: this.userAgent,
+        waitForSelector,
+      });
+
+      return this.parseHtml(browserHtml, searchUrl, request, { browser: true });
+    } catch (error) {
+      warnings.push(
+        error instanceof Error
+          ? `Browser automation fallback failed for ${this.merchant}: ${error.message}`
+          : `Browser automation fallback failed for ${this.merchant}.`,
+      );
+      return [];
+    }
   }
 
   private listSeedSnapshots() {

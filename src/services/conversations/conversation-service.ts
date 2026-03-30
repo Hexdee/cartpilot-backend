@@ -311,6 +311,16 @@ export class ConversationService {
 
     await this.store.createSearchSession(searchSession);
     const reply = this.channelReplyService.buildSearchReply(input.channel, searchSession);
+    if (!result.offers.length && result.sources?.length) {
+      const diagnostics = result.sources
+        .map((source) => {
+          const warningText = source.warnings?.length ? `; ${source.warnings.join(" | ")}` : "";
+          return `${source.merchant}: ${source.resultCount} raw, ${source.filteredResultCount ?? 0} matched${warningText}`;
+        })
+        .join("\n");
+
+      reply.summary = `${reply.summary}\n\nMerchant diagnostics:\n${diagnostics}`;
+    }
     await this.outboundMessageService.sendSearchReply(input.channel, input.externalUserId, reply);
 
     return {

@@ -36,16 +36,22 @@ export function createApp() {
       mode: "live",
       timeoutMs: env.MERCHANT_HTTP_TIMEOUT_MS,
       userAgent: env.MERCHANT_USER_AGENT,
+      browserAutomationEnabled: env.MERCHANT_BROWSER_AUTOMATION_ENABLED,
+      browserTimeoutMs: env.MERCHANT_BROWSER_TIMEOUT_MS,
     }),
     new KongaMerchantAdapter(env.KONGA_SEARCH_BASE_URL, {
       mode: "live",
       timeoutMs: env.MERCHANT_HTTP_TIMEOUT_MS,
       userAgent: env.MERCHANT_USER_AGENT,
+      browserAutomationEnabled: env.MERCHANT_BROWSER_AUTOMATION_ENABLED,
+      browserTimeoutMs: env.MERCHANT_BROWSER_TIMEOUT_MS,
     }),
     new AliExpressMerchantAdapter({
       mode: "live",
       timeoutMs: env.MERCHANT_HTTP_TIMEOUT_MS,
       userAgent: env.MERCHANT_USER_AGENT,
+      browserAutomationEnabled: env.MERCHANT_BROWSER_AUTOMATION_ENABLED,
+      browserTimeoutMs: env.MERCHANT_BROWSER_TIMEOUT_MS,
     }),
   ];
   const searchService = new SearchService(aiProvider, merchantAdapters);
