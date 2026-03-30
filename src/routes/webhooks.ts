@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { NextFunction, Request, Response, Router } from "express";
 import { z } from "zod";
 import { env } from "@/config/env";
 import { verifyHmacSignature } from "@/lib/signatures";
@@ -36,7 +36,7 @@ const telegramMessageSchema = z.object({
 export function createWebhookRouter(conversationService: ConversationService) {
   const router = Router();
 
-  router.get("/whatsapp/verify", (request, response, next) => {
+  const handleWhatsAppVerification = (request: Request, response: Response, next: NextFunction) => {
     const mode = request.query["hub.mode"];
     const token = request.query["hub.verify_token"];
     const challenge = request.query["hub.challenge"];
@@ -46,7 +46,10 @@ export function createWebhookRouter(conversationService: ConversationService) {
     }
 
     return response.status(200).send(challenge);
-  });
+  };
+
+  router.get("/whatsapp", handleWhatsAppVerification);
+  router.get("/whatsapp/verify", handleWhatsAppVerification);
 
   router.post("/whatsapp", async (request, response, next) => {
     try {
