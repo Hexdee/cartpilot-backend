@@ -58,7 +58,23 @@ export function createWebhookRouter(conversationService: ConversationService) {
         throw new HttpError(401, "Invalid WhatsApp signature.");
       }
 
-      const messages = request.body?.entry?.flatMap((entry: { changes?: Array<{ value?: { messages?: Array<{ from?: string; text?: { body?: string } }> } }> }) =>
+      const messages = request.body?.entry?.flatMap((entry: {
+        changes?: Array<{
+          value?: {
+            contacts?: Array<{ profile?: { name?: string } }>;
+            messages?: Array<{
+              from?: string;
+              type?: string;
+              text?: { body?: string };
+              interactive?: {
+                type?: string;
+                button_reply?: { id?: string; title?: string };
+                list_reply?: { id?: string; title?: string };
+              };
+            }>;
+          };
+        }>;
+      }) =>
         entry.changes ?? [],
       ) ?? [];
 
@@ -66,12 +82,23 @@ export function createWebhookRouter(conversationService: ConversationService) {
         const message = change.value?.messages?.[0];
         const sender = message?.from;
         const text = message?.text?.body;
+        const displayName = change.value?.contacts?.[0]?.profile?.name;
+        const interactiveReplyId =
+          message?.interactive?.button_reply?.id ?? message?.interactive?.list_reply?.id;
 
         if (sender && text) {
           await conversationService.handleInboundMessage({
             channel: "whatsapp",
             externalUserId: sender,
+            displayName,
             message: text,
+          });
+        } else if (sender && interactiveReplyId) {
+          await conversationService.handleChannelAction({
+            channel: "whatsapp",
+            externalUserId: sender,
+            displayName,
+            data: interactiveReplyId,
           });
         }
       }

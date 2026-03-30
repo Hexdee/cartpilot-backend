@@ -14,6 +14,8 @@ type TelegramInlineKeyboard = {
   inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>>;
 };
 
+type WhatsAppReplyButton = { type: "reply"; reply: { id: string; title: string } };
+
 function isTelegramSafeUrl(url: string | undefined) {
   if (!url) return false;
 
@@ -86,6 +88,58 @@ export class OutboundMessageService {
       return;
     }
 
+    if (channel === "whatsapp") {
+      if (reply.topOffers.length === 0) {
+        await this.sendWhatsAppMessage(recipientId, truncate(reply.summary, 1024));
+        return;
+      }
+
+      const page = reply.page ?? 1;
+      const pageSize = reply.pageSize ?? reply.topOffers.length;
+      const start = (page - 1) * pageSize + 1;
+      const end = Math.min(start + reply.topOffers.length - 1, reply.totalOffers ?? reply.topOffers.length);
+      const header = [
+        page > 1
+          ? `More live offers (${start}-${end}${reply.totalOffers ? ` of ${reply.totalOffers}` : ""})`
+          : reply.summary,
+        page === 1
+          ? `Showing ${reply.topOffers.length} product${reply.topOffers.length === 1 ? "" : "s"} below.`
+          : null,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+
+      await this.sendWhatsAppMessage(recipientId, truncate(header, 1024));
+
+      for (const offer of reply.topOffers) {
+        await this.sendWhatsAppProductCard(recipientId, offer, reply.searchSessionId);
+      }
+
+      const footerButtons: WhatsAppReplyButton[] = [];
+      if (reply.hasMore && reply.searchSessionId) {
+        footerButtons.push({
+          type: "reply",
+          reply: {
+            id: `more:${reply.searchSessionId}:${page + 1}`,
+            title: "More offers",
+          },
+        });
+      }
+      footerButtons.push(
+        { type: "reply", reply: { id: "track", title: "Track order" } },
+        { type: "reply", reply: { id: "wallet", title: "Wallet" } },
+      );
+
+      await this.sendWhatsAppButtons(recipientId, {
+        body: [
+          "What do you want to do next?",
+          `Full results: ${reply.webLinks.results}`,
+        ].join("\n"),
+        buttons: footerButtons.slice(0, 3),
+      });
+      return;
+    }
+
     const lines = [
       reply.summary,
       "",
@@ -124,6 +178,17 @@ export class OutboundMessageService {
               inline_keyboard: [[{ text: "Track order", url: payload.trackingUrl }]],
             }
           : undefined,
+      });
+      return;
+    }
+
+    if (channel === "whatsapp") {
+      await this.sendWhatsAppButtons(recipientId, {
+        body: `${payload.summary}\n\nTrack order: ${payload.trackingUrl}`,
+        buttons: [
+          { type: "reply", reply: { id: "track", title: "Track order" } },
+          { type: "reply", reply: { id: "wallet", title: "Wallet" } },
+        ],
       });
       return;
     }
@@ -198,6 +263,43 @@ export class OutboundMessageService {
             : []),
         ],
       },
+    });
+  }
+
+  async sendWhatsAppOfferSelection(
+    recipientId: string,
+    payload: {
+      summary: string;
+      checkoutUrl: string;
+      resultsUrl: string;
+      walletCheckoutUrl?: string;
+    },
+  ) {
+    const lines = [
+      payload.summary,
+      "",
+      `Checkout: ${payload.checkoutUrl}`,
+      payload.walletCheckoutUrl ? `Wallet checkout: ${payload.walletCheckoutUrl}` : null,
+      `View details: ${payload.resultsUrl}`,
+    ].filter(Boolean);
+
+    await this.sendWhatsAppButtons(recipientId, {
+      body: truncate(lines.join("\n"), 1024),
+      buttons: [
+        { type: "reply", reply: { id: "wallet", title: "Wallet" } },
+        { type: "reply", reply: { id: "track", title: "Track order" } },
+      ],
+    });
+  }
+
+  async sendWhatsAppWelcome(recipientId: string, text: string) {
+    await this.sendWhatsAppButtons(recipientId, {
+      body: truncate(text, 1024),
+      buttons: [
+        { type: "reply", reply: { id: "welcome_search", title: "Search product" } },
+        { type: "reply", reply: { id: "track", title: "Track order" } },
+        { type: "reply", reply: { id: "wallet", title: "Wallet" } },
+      ],
     });
   }
 
@@ -335,5 +437,147 @@ export class OutboundMessageService {
       const body = await response.text();
       logger.error({ body, status: response.status }, "WhatsApp send failed.");
     }
+  }
+
+  private async sendWhatsAppButtons(
+    recipientId: string,
+    payload: {
+      body: string;
+      buttons: WhatsAppReplyButton[];
+      headerText?: string;
+      footerText?: string;
+    },
+  ) {
+    if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID) {
+      logger.warn(
+        "WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID is not configured. Skipping WhatsApp send.",
+      );
+      return;
+    }
+
+    const response = await fetch(
+      `https://graph.facebook.com/v23.0/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`,
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: recipientId,
+          type: "interactive",
+          interactive: {
+            type: "button",
+            header: payload.headerText
+              ? {
+                  type: "text",
+                  text: payload.headerText,
+                }
+              : undefined,
+            body: {
+              text: payload.body,
+            },
+            footer: payload.footerText
+              ? {
+                  text: payload.footerText,
+                }
+              : undefined,
+            action: {
+              buttons: payload.buttons.slice(0, 3),
+            },
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      logger.error({ body, status: response.status }, "WhatsApp interactive send failed.");
+    }
+  }
+
+  private async sendWhatsAppImage(recipientId: string, imageUrl: string, caption?: string) {
+    if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID) {
+      logger.warn(
+        "WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID is not configured. Skipping WhatsApp send.",
+      );
+      return false;
+    }
+
+    const response = await fetch(
+      `https://graph.facebook.com/v23.0/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`,
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: recipientId,
+          type: "image",
+          image: {
+            link: imageUrl,
+            caption,
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      logger.error({ body, status: response.status }, "WhatsApp image send failed.");
+      return false;
+    }
+
+    return true;
+  }
+
+  private async sendWhatsAppProductCard(
+    recipientId: string,
+    offer: AssistantReply["topOffers"][number],
+    searchSessionId?: string,
+  ) {
+    const body = [
+      `${offer.merchant}`,
+      compactOfferTitle(offer.title, 90),
+      `${this.formatNaira(offer.totalCost)} • ${offer.etaLabel} • ${offer.rating.toFixed(1)}★`,
+      offer.summary ? offer.summary.slice(0, 140) : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const imageUrl = offer.imageUrl;
+    if (imageUrl && isRemoteMediaUrl(imageUrl)) {
+      await this.sendWhatsAppImage(recipientId, imageUrl, truncate(body, 1024));
+    } else {
+      await this.sendWhatsAppMessage(recipientId, truncate(body, 1024));
+    }
+
+    if (!searchSessionId) {
+      return;
+    }
+
+    await this.sendWhatsAppButtons(recipientId, {
+      body: "Would you like to continue with this offer?",
+      buttons: [
+        {
+          type: "reply",
+          reply: {
+            id: `choose:${searchSessionId}:${offer.id}`,
+            title: "Buy this",
+          },
+        },
+        {
+          type: "reply",
+          reply: {
+            id: "wallet",
+            title: "Wallet",
+          },
+        },
+      ],
+      footerText: offer.merchant,
+    });
   }
 }

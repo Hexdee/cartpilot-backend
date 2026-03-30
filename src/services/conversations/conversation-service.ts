@@ -57,6 +57,10 @@ export class ConversationService {
 
     switch (name) {
       case "start":
+        if (input.channel === "whatsapp") {
+          return this.sendWhatsAppWelcome(input.externalUserId);
+        }
+
         return this.sendPlainText(
           input.channel,
           input.externalUserId,
@@ -74,6 +78,33 @@ export class ConversationService {
           ].join("\n"),
         );
       case "help":
+        if (input.channel === "whatsapp") {
+          return this.sendPlainText(
+            input.channel,
+            input.externalUserId,
+            [
+              "CartPilot on WhatsApp",
+              "",
+              "Send a product request in plain English and I will search supported stores for live offers.",
+              "",
+              "You can also type these commands:",
+              "/search <product>  Search for a product",
+              "/deal <product>  Cheapest matching offers",
+              "/fast <product>  Fastest delivery offers",
+              "/rated <product>  Highest-rated offers",
+              "/more  Next set of offers from your latest search",
+              "/results  Open the latest comparison page",
+              "/track  Check your latest order status",
+              "/wallet  Show your wallet balance and funding address",
+              "",
+              "Examples:",
+              "need a fast blender under 120000",
+              "/search iphone 14 128gb",
+              "/track",
+            ].join("\n"),
+          );
+        }
+
         return this.sendPlainText(
           input.channel,
           input.externalUserId,
@@ -268,6 +299,7 @@ export class ConversationService {
 
     if (action === "choose" && searchSessionId && rawPage) {
       const result = await this.handleOfferSelection(
+        "telegram",
         input.externalUserId,
         searchSessionId,
         rawPage,
@@ -284,6 +316,80 @@ export class ConversationService {
       "That action is not supported yet.",
     );
     return null;
+  }
+
+  async handleChannelAction(input: {
+    channel: Extract<ChannelType, "telegram" | "whatsapp">;
+    externalUserId: string;
+    data: string;
+    displayName?: string;
+  }) {
+    const [action, searchSessionId, rawPage] = input.data.split(":");
+
+    if (input.channel === "telegram") {
+      return this.handleTelegramCallback({
+        externalUserId: input.externalUserId,
+        displayName: input.displayName,
+        callbackQueryId: "",
+        data: input.data,
+      });
+    }
+
+    if (action === "welcome_search") {
+      return this.sendPlainText(
+        "whatsapp",
+        input.externalUserId,
+        "Tell me what you want to buy. Example: iPhone 14 128GB, fast delivery.",
+      );
+    }
+
+    if (action === "track") {
+      return this.handleCommand({
+        channel: "whatsapp",
+        externalUserId: input.externalUserId,
+        displayName: input.displayName,
+        conversationSessionId: (await this.store.getOrCreateConversationSession(
+          "whatsapp",
+          input.externalUserId,
+          input.displayName,
+        )).id,
+        command: { name: "track", args: "" },
+      });
+    }
+
+    if (action === "wallet") {
+      return this.handleCommand({
+        channel: "whatsapp",
+        externalUserId: input.externalUserId,
+        displayName: input.displayName,
+        conversationSessionId: (await this.store.getOrCreateConversationSession(
+          "whatsapp",
+          input.externalUserId,
+          input.displayName,
+        )).id,
+        command: { name: "wallet", args: "" },
+      });
+    }
+
+    if (action === "more" && searchSessionId) {
+      const page = Number.parseInt(rawPage ?? "2", 10);
+      return this.sendSearchPage(
+        "whatsapp",
+        input.externalUserId,
+        searchSessionId,
+        Number.isFinite(page) && page > 1 ? page : 2,
+      );
+    }
+
+    if (action === "choose" && searchSessionId && rawPage) {
+      return this.handleOfferSelection("whatsapp", input.externalUserId, searchSessionId, rawPage);
+    }
+
+    return this.sendPlainText(
+      "whatsapp",
+      input.externalUserId,
+      "That action is not supported yet. Send /help to see what you can do.",
+    );
   }
 
   private async runSearchFlow(input: {
@@ -391,6 +497,7 @@ export class ConversationService {
   }
 
   private async handleOfferSelection(
+    channel: Extract<ChannelType, "telegram" | "whatsapp">,
     externalUserId: string,
     searchSessionId: string,
     offerId: string,
@@ -399,7 +506,7 @@ export class ConversationService {
 
     if (!searchSession) {
       await this.sendPlainText(
-        "telegram",
+        channel,
         externalUserId,
         "I could not find that search anymore. Please run the search again.",
       );
@@ -409,7 +516,7 @@ export class ConversationService {
     const offer = searchSession.offers.find((entry) => entry.id === offerId);
     if (!offer) {
       await this.sendPlainText(
-        "telegram",
+        channel,
         externalUserId,
         "That offer is no longer available in this result set.",
       );
@@ -422,14 +529,14 @@ export class ConversationService {
       searchSessionId: searchSession.id,
       offerId: offer.id,
       expiresAt: new Date(Date.now() + 1000 * 60 * 60).toISOString(),
-      channel: "telegram",
+      channel,
       payload: {
-        source: "telegram_offer_selection",
+        source: `${channel}_offer_selection`,
       },
       createdAt: new Date().toISOString(),
     });
 
-    const wallet = await this.store.getWallet("telegram", externalUserId);
+    const wallet = await this.store.getWallet(channel, externalUserId);
     const platformFee = Math.max(3900, Math.round(offer.totalCost * 0.014));
     const checkoutUrl = this.deepLinkService.checkoutLink(checkoutSessionId);
     const walletCheckoutUrl =
@@ -439,7 +546,7 @@ export class ConversationService {
           })
         : undefined;
 
-    await this.outboundMessageService.sendTelegramOfferSelection(externalUserId, {
+    const payload = {
       summary: [
         `Selected: ${offer.merchant}`,
         `${offer.title}`,
@@ -450,11 +557,43 @@ export class ConversationService {
       checkoutUrl,
       walletCheckoutUrl,
       resultsUrl: this.deepLinkService.resultsLink(searchSession),
-    });
+    };
+
+    if (channel === "telegram") {
+      await this.outboundMessageService.sendTelegramOfferSelection(externalUserId, payload);
+    } else {
+      await this.outboundMessageService.sendWhatsAppOfferSelection(externalUserId, payload);
+    }
 
     return {
       offer,
       checkoutSessionId,
+    };
+  }
+
+  private async sendWhatsAppWelcome(externalUserId: string) {
+    const text = [
+      "Welcome to CartPilot on WhatsApp.",
+      "",
+      "CartPilot is a concierge shopping assistant that helps you search supported stores, compare live offers, choose the product you want, and continue to checkout or tracking from one place.",
+      "",
+      "Send a product request in plain English or use the quick actions below.",
+      "",
+      "Examples:",
+      "iPhone 14 128GB",
+      "need a fast blender under 120000",
+      "track my latest order",
+    ].join("\n");
+
+    await this.outboundMessageService.sendWhatsAppWelcome(externalUserId, text);
+    return {
+      reply: {
+        summary: text,
+        topOffers: [],
+        webLinks: {
+          results: "",
+        },
+      },
     };
   }
 }
