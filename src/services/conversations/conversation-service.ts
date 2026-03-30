@@ -39,6 +39,10 @@ export class ConversationService {
       });
     }
 
+    if (input.channel === "whatsapp" && this.isWhatsAppGreeting(input.message)) {
+      return this.sendWhatsAppWelcome(input.externalUserId);
+    }
+
     return this.runSearchFlow({
       ...input,
       conversationSessionId: conversationSession.id,
@@ -85,22 +89,16 @@ export class ConversationService {
             [
               "CartPilot on WhatsApp",
               "",
-              "Send a product request in plain English and I will search supported stores for live offers.",
+              "You can talk to CartPilot naturally on WhatsApp. Tell me what you want to buy, how quickly you need it, or whether you want the best deal, and I will search supported stores for live offers.",
               "",
-              "You can also type these commands:",
-              "/search <product>  Search for a product",
-              "/deal <product>  Cheapest matching offers",
-              "/fast <product>  Fastest delivery offers",
-              "/rated <product>  Highest-rated offers",
-              "/more  Next set of offers from your latest search",
-              "/results  Open the latest comparison page",
-              "/track  Check your latest order status",
-              "/wallet  Show your wallet balance and funding address",
+              "You can ask things like:",
+              "Find me an iPhone 14 128GB",
+              "I need a fast blender under 120000 naira",
+              "Show me the best rated office chair",
+              "Track my latest order",
+              "What is my wallet balance?",
               "",
-              "Examples:",
-              "need a fast blender under 120000",
-              "/search iphone 14 128gb",
-              "/track",
+              "If you are not sure how to phrase it, just describe the product and what matters most to you.",
             ].join("\n"),
           );
         }
@@ -577,12 +575,14 @@ export class ConversationService {
       "",
       "CartPilot is a concierge shopping assistant that helps you search supported stores, compare live offers, choose the product you want, and continue to checkout or tracking from one place.",
       "",
-      "Send a product request in plain English or use the quick actions below.",
+      "You can talk to me naturally here. Tell me what you want to buy, whether you want the best deal, the fastest delivery, or the best rating, and I will help you find it.",
       "",
       "Examples:",
-      "iPhone 14 128GB",
-      "need a fast blender under 120000",
-      "track my latest order",
+      "I need an iPhone 14 128GB",
+      "Find me the best deal for Dr Teal body wash",
+      "Track my latest order",
+      "",
+      "What would you like to shop for today?",
     ].join("\n");
 
     await this.outboundMessageService.sendWhatsAppWelcome(externalUserId, text);
@@ -595,5 +595,49 @@ export class ConversationService {
         },
       },
     };
+  }
+
+  private isWhatsAppGreeting(message: string) {
+    const normalized = message
+      .trim()
+      .toLowerCase()
+      .replace(/[!?.;,]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const greetingPhrases = new Set([
+      "hello",
+      "hi",
+      "hey",
+      "yo",
+      "hola",
+      "good morning",
+      "good afternoon",
+      "good evening",
+      "how far",
+      "what's up",
+      "whats up",
+      "sup",
+      "help",
+      "menu",
+      "start",
+    ]);
+
+    if (greetingPhrases.has(normalized)) {
+      return true;
+    }
+
+    const tokens = normalized.split(" ").filter(Boolean);
+    if (tokens.length > 4) {
+      return false;
+    }
+
+    return (
+      tokens.length > 0
+      && tokens.every((token) =>
+        ["hello", "hi", "hey", "yo", "help", "menu", "start", "please"].includes(token)
+        || token.startsWith("good"),
+      )
+    );
   }
 }
