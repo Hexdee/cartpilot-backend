@@ -1,9 +1,6 @@
 import { load } from "cheerio";
-import {
-  buildOfferId,
-  getOfferSeed,
-  seedSnapshotToRawOffer,
-} from "@/domain/catalog";
+import { buildOfferId } from "@/domain/catalog";
+import { getOfferSeed, seedSnapshotToRawOffer } from "@/domain/demo-data";
 import { renderSearchPageHtml } from "@/services/search/search-browser";
 import {
   MerchantRawOffer,
@@ -109,6 +106,7 @@ export abstract class LiveMerchantAdapter implements MerchantAdapter {
         searchUrl,
       };
     } catch (error) {
+
       if (this.mode === "hybrid") {
         const seed = this.createSeedResponse(request);
         return {
