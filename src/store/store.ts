@@ -79,4 +79,5 @@ export interface Store {
   getRecipientForSearchSession(
     searchSessionId: string,
   ): Promise<{ channel: ChannelType; externalId: string; displayName?: string } | null>;
+  getSearchCountToday(channel: ChannelType, externalId: string): Promise<number>;
 }

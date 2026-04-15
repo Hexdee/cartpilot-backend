@@ -986,4 +986,23 @@ export class PrismaStore implements Store {
       displayName: searchSession.conversationSession.channelIdentity.displayName ?? undefined,
     };
   }
+
+  async getSearchCountToday(channel: ChannelType, externalId: string) {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    return this.prisma.searchSession.count({
+      where: {
+        conversationSession: {
+          channelIdentity: {
+            channel: asPrismaChannel(channel),
+            externalId,
+          },
+        },
+        createdAt: {
+          gte: startOfDay,
+        },
+      },
+    });
+  }
 }

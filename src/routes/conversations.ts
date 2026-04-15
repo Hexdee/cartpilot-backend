@@ -10,6 +10,9 @@ const paramsSchema = z.object({
 const bodySchema = z.object({
   message: z.string().min(2),
   displayName: z.string().optional(),
+  rankingMode: z
+    .enum(["fastest_delivery", "lowest_total_price", "highest_rating", "balanced"])
+    .optional(),
 });
 
 export function createConversationRouter(conversationService: ConversationService) {
@@ -24,6 +27,7 @@ export function createConversationRouter(conversationService: ConversationServic
         externalUserId: sessionId,
         displayName: body.displayName,
         message: body.message,
+        rankingModeOverride: body.rankingMode,
       });
 
       response.status(200).json(result);

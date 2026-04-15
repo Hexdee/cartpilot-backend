@@ -23,6 +23,25 @@ const booleanFlag = z.preprocess((value) => {
   return value;
 }, z.boolean().default(false));
 
+const merchantSearchMode = z.enum(["seed", "live", "hybrid"]).default("live");
+
+const merchantList = z.preprocess((value) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return ["jumia", "konga", "jiji"];
+  }
+
+  const parsed = value
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+
+  return parsed.length > 0 ? parsed : ["jumia", "konga", "jiji"];
+}, z.array(z.enum(["jumia", "konga", "jiji", "aliexpress", "temu"])));
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(8080),
@@ -32,9 +51,15 @@ const envSchema = z.object({
   MERCHANT_BROWSER_TIMEOUT_MS: z.coerce.number().default(20000),
   MERCHANT_BROWSER_AUTOMATION_ENABLED: booleanFlag,
   MERCHANT_USER_AGENT: z.string().default("CartPilotBot/1.0 (+https://cartpilot.local)"),
+  SEARCH_DEBUG_WRITE_ENABLED: booleanFlag,
+  SEARCH_DEBUG_DIR: z.string().default("debug/search"),
+  MERCHANT_SEARCH_MODE: merchantSearchMode,
+  MERCHANTS_ENABLED: merchantList,
   PLAYWRIGHT_EXECUTABLE_PATH: optionalString,
   JUMIA_SEARCH_BASE_URL: z.string().url().default("https://www.jumia.com.ng/catalog/"),
   KONGA_SEARCH_BASE_URL: z.string().url().default("https://www.konga.com/search"),
+  JIJI_SEARCH_BASE_URL: z.string().url().default("https://jiji.ng/search"),
+  TEMU_SEARCH_BASE_URL: z.string().url().default("https://www.temu.com/search_result.html"),
   ADMIN_API_TOKEN: z.string().default("change-me"),
   JWT_SECRET: z.string().default("change-me"),
   WHATSAPP_VERIFY_TOKEN: z.string().default("change-me"),

@@ -23,6 +23,7 @@ export class ConversationService {
     externalUserId: string;
     message: string;
     displayName?: string;
+    rankingModeOverride?: RankingMode;
   }) {
     const conversationSession = await this.store.getOrCreateConversationSession(
       input.channel,
@@ -47,6 +48,7 @@ export class ConversationService {
       ...input,
       conversationSessionId: conversationSession.id,
       message: input.message,
+      rankingModeOverride: input.rankingModeOverride,
     });
   }
 
@@ -398,6 +400,15 @@ export class ConversationService {
     message: string;
     rankingModeOverride?: RankingMode;
   }) {
+    const searchCountToday = await this.store.getSearchCountToday(input.channel, input.externalUserId);
+    if (searchCountToday >= 10) {
+      return this.sendPlainText(
+        input.channel,
+        input.externalUserId,
+        "You have reached your daily limit of 10 searches. Please come back tomorrow or contact support for higher limits.",
+      );
+    }
+
     const parsed = await this.aiProvider.parseSearchIntent(input.message, [input.message]);
     const intent: SearchIntent = input.rankingModeOverride
       ? { ...parsed, rankingMode: input.rankingModeOverride }

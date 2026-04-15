@@ -11,7 +11,9 @@ import { PrismaStore } from "@/store/prisma-store";
 import { ZeroGAiProvider } from "@/services/ai/zero-g-ai-provider";
 import { JumiaMerchantAdapter } from "@/services/search/jumia-adapter";
 import { KongaMerchantAdapter } from "@/services/search/konga-adapter";
+import { JijiMerchantAdapter } from "@/services/search/jiji-adapter";
 import { AliExpressMerchantAdapter } from "@/services/search/aliexpress-adapter";
+import { TemuMerchantAdapter } from "@/services/search/temu-adapter";
 import { SearchService } from "@/services/search/search-service";
 import { DeepLinkService } from "@/services/auth/deep-link-service";
 import { ChannelReplyService } from "@/services/channels/channel-reply-service";
@@ -31,29 +33,28 @@ import { adminAuthMiddleware } from "@/middleware/admin-auth";
 export function createApp() {
   const store = env.DATABASE_URL ? new PrismaStore(getPrismaClient()) : new MemoryStore();
   const aiProvider = new ZeroGAiProvider();
-  const merchantAdapters = [
-    new JumiaMerchantAdapter(env.JUMIA_SEARCH_BASE_URL, {
-      mode: "live",
-      timeoutMs: env.MERCHANT_HTTP_TIMEOUT_MS,
-      userAgent: env.MERCHANT_USER_AGENT,
-      browserAutomationEnabled: env.MERCHANT_BROWSER_AUTOMATION_ENABLED,
-      browserTimeoutMs: env.MERCHANT_BROWSER_TIMEOUT_MS,
-    }),
-    new KongaMerchantAdapter(env.KONGA_SEARCH_BASE_URL, {
-      mode: "live",
-      timeoutMs: env.MERCHANT_HTTP_TIMEOUT_MS,
-      userAgent: env.MERCHANT_USER_AGENT,
-      browserAutomationEnabled: env.MERCHANT_BROWSER_AUTOMATION_ENABLED,
-      browserTimeoutMs: env.MERCHANT_BROWSER_TIMEOUT_MS,
-    }),
-    new AliExpressMerchantAdapter({
-      mode: "live",
-      timeoutMs: env.MERCHANT_HTTP_TIMEOUT_MS,
-      userAgent: env.MERCHANT_USER_AGENT,
-      browserAutomationEnabled: env.MERCHANT_BROWSER_AUTOMATION_ENABLED,
-      browserTimeoutMs: env.MERCHANT_BROWSER_TIMEOUT_MS,
-    }),
-  ];
+  const merchantAdapterConfig = {
+    mode: env.MERCHANT_SEARCH_MODE,
+    timeoutMs: env.MERCHANT_HTTP_TIMEOUT_MS,
+    userAgent: env.MERCHANT_USER_AGENT,
+    browserAutomationEnabled: env.MERCHANT_BROWSER_AUTOMATION_ENABLED,
+    browserTimeoutMs: env.MERCHANT_BROWSER_TIMEOUT_MS,
+  } as const;
+
+  const merchantAdapters = env.MERCHANTS_ENABLED.map((merchant) => {
+    switch (merchant) {
+      case "jumia":
+        return new JumiaMerchantAdapter(env.JUMIA_SEARCH_BASE_URL, merchantAdapterConfig);
+      case "konga":
+        return new KongaMerchantAdapter(env.KONGA_SEARCH_BASE_URL, merchantAdapterConfig);
+      case "jiji":
+        return new JijiMerchantAdapter(env.JIJI_SEARCH_BASE_URL, merchantAdapterConfig);
+      case "aliexpress":
+        return new AliExpressMerchantAdapter(merchantAdapterConfig);
+      case "temu":
+        return new TemuMerchantAdapter(env.TEMU_SEARCH_BASE_URL, merchantAdapterConfig);
+    }
+  });
   const searchService = new SearchService(aiProvider, merchantAdapters);
   const deepLinkService = new DeepLinkService();
   const channelReplyService = new ChannelReplyService(deepLinkService, aiProvider);
