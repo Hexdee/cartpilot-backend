@@ -152,6 +152,33 @@ export class ZeroGAiProvider implements AiProvider {
     return this.fallback.summarizeOrderStatus(order, trackingEvents);
   }
 
+  async formatSearchRequest(query: string): Promise<string> {
+    if (!this.computeClient.isConfigured()) {
+      return this.fallback.formatSearchRequest(query);
+    }
+
+    try {
+      const completion = await this.computeClient.runChat([
+        {
+          role: "system",
+          content:
+            "Format the user's shopping request into a concise search query for an ecommerce site. Remove all conversational filler, adjectives like 'cheapest' or 'fastest', and constraints like 'delivery this week'. Return only the core product name and key specifications.",
+        },
+        {
+          role: "user",
+          content: query,
+        },
+      ]);
+      return completion.content.replace(/^["']|["']$/g, "").trim();
+    } catch (error) {
+      logger.warn(
+        { task: "formatSearchRequest", error: error instanceof Error ? error.message : String(error) },
+        "0G format failed. Falling back to heuristic.",
+      );
+      return this.fallback.formatSearchRequest(query);
+    }
+  }
+
   private async runJsonTask<T>(
     systemInstruction: string,
     userContent: string,

@@ -86,6 +86,10 @@ export class HeuristicAiProvider implements AiProvider {
     return `Order ${order.publicOrderId} is currently ${order.status.replace(/_/g, " ")}. Latest update: ${latestEvent.detail}`;
   }
 
+  async formatSearchRequest(query: string): Promise<string> {
+    return extractSearchQuery(query);
+  }
+
   private normalizeRawOffer(
     searchIntent: SearchIntent,
     rawOffer: MerchantRawOffer,

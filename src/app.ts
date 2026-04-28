@@ -15,6 +15,7 @@ import { JijiMerchantAdapter } from "@/services/search/jiji-adapter";
 import { AliExpressMerchantAdapter } from "@/services/search/aliexpress-adapter";
 import { TemuMerchantAdapter } from "@/services/search/temu-adapter";
 import { SearchService } from "@/services/search/search-service";
+import { SpellCheckService } from "@/services/search/spell-check-service";
 import { DeepLinkService } from "@/services/auth/deep-link-service";
 import { ChannelReplyService } from "@/services/channels/channel-reply-service";
 import { OutboundMessageService } from "@/services/channels/outbound-message-service";
@@ -28,6 +29,7 @@ import { createOrderRouter } from "@/routes/orders";
 import { createAdminRouter } from "@/routes/admin";
 import { createCustomerRouter } from "@/routes/customers";
 import { createWalletRouter } from "@/routes/wallets";
+import { createMerchantRouter } from "@/routes/merchants";
 import { adminAuthMiddleware } from "@/middleware/admin-auth";
 
 export function createApp() {
@@ -55,7 +57,8 @@ export function createApp() {
         return new TemuMerchantAdapter(env.TEMU_SEARCH_BASE_URL, merchantAdapterConfig);
     }
   });
-  const searchService = new SearchService(aiProvider, merchantAdapters);
+  const spellCheckService = new SpellCheckService();
+  const searchService = new SearchService(aiProvider, spellCheckService, merchantAdapters);
   const deepLinkService = new DeepLinkService();
   const channelReplyService = new ChannelReplyService(deepLinkService, aiProvider);
   const outboundMessageService = new OutboundMessageService();
@@ -106,6 +109,7 @@ export function createApp() {
   app.use("/api/orders", createOrderRouter(store, orderService, deepLinkService));
   app.use("/api/customers", createCustomerRouter(store));
   app.use("/api/wallets", createWalletRouter(store));
+  app.use("/api/merchants", createMerchantRouter(merchantAdapters));
   app.use("/api/admin", adminAuthMiddleware, createAdminRouter(orderService));
 
   app.use((_request, _response, next) => {

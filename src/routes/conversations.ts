@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { ConversationService } from "@/services/conversations/conversation-service";
+import { logger } from "@/lib/logger";
 
 const paramsSchema = z.object({
   channel: z.enum(["whatsapp", "telegram", "web"]),
@@ -22,6 +23,12 @@ export function createConversationRouter(conversationService: ConversationServic
     try {
       const { channel, sessionId } = paramsSchema.parse(request.params);
       const body = bodySchema.parse(request.body);
+
+      logger.info(
+        { channel, sessionId, message: body.message },
+        "Handling inbound conversation message.",
+      );
+
       const result = await conversationService.handleInboundMessage({
         channel,
         externalUserId: sessionId,
@@ -32,6 +39,7 @@ export function createConversationRouter(conversationService: ConversationServic
 
       response.status(200).json(result);
     } catch (error) {
+      logger.error({ error, params: request.params }, "Failed to handle conversation message.");
       next(error);
     }
   });

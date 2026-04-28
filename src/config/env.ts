@@ -56,6 +56,7 @@ const envSchema = z.object({
   MERCHANT_SEARCH_MODE: merchantSearchMode,
   MERCHANTS_ENABLED: merchantList,
   PLAYWRIGHT_EXECUTABLE_PATH: optionalString,
+  REMOTE_FALLBACK_BASE_URL: z.string().url().default("https://cartpilot.onrender.com"),
   JUMIA_SEARCH_BASE_URL: z.string().url().default("https://www.jumia.com.ng/catalog/"),
   KONGA_SEARCH_BASE_URL: z.string().url().default("https://www.konga.com/search"),
   JIJI_SEARCH_BASE_URL: z.string().url().default("https://jiji.ng/search"),

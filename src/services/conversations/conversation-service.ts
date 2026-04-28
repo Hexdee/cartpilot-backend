@@ -44,6 +44,10 @@ export class ConversationService {
       return this.sendWhatsAppWelcome(input.externalUserId);
     }
 
+    if (input.channel === "web" && this.isWebGreeting(input.message)) {
+      return this.sendWebWelcome(input.externalUserId);
+    }
+
     return this.runSearchFlow({
       ...input,
       conversationSessionId: conversationSession.id,
@@ -65,6 +69,10 @@ export class ConversationService {
       case "start":
         if (input.channel === "whatsapp") {
           return this.sendWhatsAppWelcome(input.externalUserId);
+        }
+
+        if (input.channel === "web") {
+          return this.sendWebWelcome(input.externalUserId);
         }
 
         return this.sendPlainText(
@@ -103,6 +111,10 @@ export class ConversationService {
               "If you are not sure how to phrase it, just describe the product and what matters most to you.",
             ].join("\n"),
           );
+        }
+
+        if (input.channel === "web") {
+          return this.sendWebWelcome(input.externalUserId);
         }
 
         return this.sendPlainText(
@@ -409,11 +421,31 @@ export class ConversationService {
       );
     }
 
-    const parsed = await this.aiProvider.parseSearchIntent(input.message, [input.message]);
+    console.log(`[Assistant] Original Input: "${input.message}"`);
+    const formattedMessage = await this.aiProvider.formatSearchRequest(input.message);
+    console.log(`[Assistant] Formatted Input: "${formattedMessage}"`);
+
+    const parsed = await this.aiProvider.parseSearchIntent(formattedMessage, [input.message]);
     const intent: SearchIntent = input.rankingModeOverride
       ? { ...parsed, rankingMode: input.rankingModeOverride }
       : parsed;
-    const result = await this.searchService.search(intent);
+
+    console.log(`[Assistant] Search Intent:`, JSON.stringify(intent, null, 2));
+
+    let result;
+    try {
+      result = await this.searchService.search(intent);
+    } catch (error) {
+      console.error("[Assistant] Search flow error:", error);
+      return this.sendPlainText(
+        input.channel,
+        input.externalUserId,
+        "Service unavailable, try again in an hour",
+      );
+    }
+
+    console.log(`[Assistant] Search Results: Found ${result.offers.length} offers`);
+
     const searchSession: SearchSession = {
       id: createId("search"),
       conversationSessionId: input.conversationSessionId,
@@ -421,12 +453,26 @@ export class ConversationService {
       intent,
       offers: result.offers,
       explanation: result.explanation,
+      sources: result.sources,
       createdAt: new Date().toISOString(),
     };
 
     await this.store.createSearchSession(searchSession);
     const reply = this.channelReplyService.buildSearchReply(input.channel, searchSession);
+
     if (!result.offers.length && result.sources?.length) {
+      const isUnavailable = result.sources.some((source) =>
+        source.warnings?.some((warning) => warning.toLowerCase().includes("service unavailable")),
+      );
+
+      if (isUnavailable) {
+        return this.sendPlainText(
+          input.channel,
+          input.externalUserId,
+          "Service unavailable, try again in an hour",
+        );
+      }
+
       const diagnostics = result.sources
         .map((source) => {
           const warningText = source.warnings?.length ? `; ${source.warnings.join(" | ")}` : "";
@@ -606,6 +652,32 @@ export class ConversationService {
         },
       },
     };
+  }
+
+  private async sendWebWelcome(externalUserId: string) {
+    const text = [
+      "Welcome to CartPilot.",
+      "",
+      "I am your concierge shopping assistant. I can help you search across supported stores, compare prices and delivery speeds, and find the best offers available today.",
+      "",
+      "Tell me what you are looking for, or ask for the 'best deal' or 'fastest delivery' for any product.",
+      "",
+      "What can I help you find today?",
+    ].join("\n");
+
+    return {
+      reply: {
+        summary: text,
+        topOffers: [],
+        webLinks: {
+          results: "",
+        },
+      },
+    };
+  }
+
+  private isWebGreeting(message: string) {
+    return this.isWhatsAppGreeting(message);
   }
 
   private isWhatsAppGreeting(message: string) {

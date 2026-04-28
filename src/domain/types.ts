@@ -123,6 +123,7 @@ export interface SearchSession {
   intent: SearchIntent;
   offers: MerchantOfferSnapshot[];
   explanation: string;
+  sources?: MerchantSearchSource[];
   createdAt: string;
 }
 

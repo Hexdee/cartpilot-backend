@@ -3,6 +3,7 @@ import { SearchIntent, SearchResult } from "@/domain/types";
 import { logger } from "@/lib/logger";
 import { AiProvider } from "@/services/ai/ai-provider";
 import { MerchantAdapter } from "@/services/search/merchant-adapter";
+import { SpellCheckService } from "@/services/search/spell-check-service";
 
 function countByMerchant<T extends { merchant: string }>(items: T[]) {
   return items.reduce<Record<string, number>>((accumulator, item) => {
@@ -14,15 +15,20 @@ function countByMerchant<T extends { merchant: string }>(items: T[]) {
 export class SearchService {
   constructor(
     private readonly aiProvider: AiProvider,
+    private readonly spellCheckService: SpellCheckService,
     private readonly merchantAdapters: MerchantAdapter[],
   ) {}
 
   async search(intent: SearchIntent): Promise<SearchResult> {
+    const optimizedQuery = await this.aiProvider.formatSearchRequest(intent.query);
+    const correctedQuery = this.spellCheckService.fixTypos(optimizedQuery);
+    const updatedIntent = { ...intent, query: correctedQuery };
+
     const adapterResults = await Promise.all(
       this.merchantAdapters.map((adapter) =>
         adapter.searchProducts({
-          query: intent.query,
-          productKey: intent.productKey,
+          query: updatedIntent.query,
+          productKey: updatedIntent.productKey,
           budget: intent.budget,
           color: intent.color,
         }),
@@ -31,21 +37,21 @@ export class SearchService {
     const rawOffers = adapterResults.flatMap((result) => result.offers);
     const filteredRawOffers = rawOffers.filter((offer) =>
       isRelevantMerchantText(
-        intent,
+        updatedIntent,
         `${offer.title} ${offer.summary ?? ""} ${offer.sourceUrl} ${offer.sellerName ?? ""}`,
       ),
     );
     const normalizationInput = filteredRawOffers.length > 0 ? filteredRawOffers : rawOffers;
-    const normalizedOffers = await this.aiProvider.normalizeMerchantOffers(intent, normalizationInput);
+    const normalizedOffers = await this.aiProvider.normalizeMerchantOffers(updatedIntent, normalizationInput);
     const relevantNormalizedOffers = normalizedOffers.filter((offer) =>
-      isRelevantMerchantText(intent, `${offer.title} ${offer.summary} ${offer.sourceUrl}`),
+      isRelevantMerchantText(updatedIntent, `${offer.title} ${offer.summary} ${offer.sourceUrl}`),
     );
 
     const rankedOffers = rankOffers(
-      intent,
+      updatedIntent,
       relevantNormalizedOffers.length > 0 ? relevantNormalizedOffers : normalizedOffers,
     );
-    const explanation = await this.aiProvider.explainRanking(intent, rankedOffers);
+    const explanation = await this.aiProvider.explainRanking(updatedIntent, rankedOffers);
     const filteredCounts = countByMerchant(filteredRawOffers);
     const normalizedCounts = countByMerchant(normalizedOffers);
     const relevantCounts = countByMerchant(relevantNormalizedOffers);
@@ -64,15 +70,16 @@ export class SearchService {
 
     logger.info(
       {
-        query: intent.query,
-        rankingMode: intent.rankingMode,
+        query: updatedIntent.query,
+        originalQuery: intent.query,
+        rankingMode: updatedIntent.rankingMode,
         merchantDiagnostics: sources,
       },
       "Merchant search diagnostics",
     );
 
     return {
-      intent,
+      intent: updatedIntent,
       offers: rankedOffers,
       explanation,
       sources,

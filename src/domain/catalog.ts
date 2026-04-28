@@ -167,11 +167,15 @@ const conversationalPrefixPatterns = [
 ];
 
 const rankingPhrasePatterns = [
-  /\bbest deal for\b/gi, /\bbest deal\b/gi, /\bcheapest\b/gi, /\blowest price\b/gi, /\bbest rated\b/gi, /\bhighest rated\b/gi, /\bfastest delivery\b/gi, /\bfast delivery\b/gi, /\bdeliver(?:y)? quickly\b/gi
+  /\bbest deal for\b/gi, /\bbest deal\b/gi, /\bcheapest\b/gi, /\blowest price\b/gi, /\bbest rated\b/gi, /\bhighest rated\b/gi, /\bfastest delivery\b/gi, /\bfast delivery\b/gi, /\bdeliver(?:y)? quickly\b/gi,
+  /\bbrand new\b/gi, /\bbrand-new\b/gi
 ];
 
 const fillerPhrasePatterns = [
-  /\bfor me\b/gi, /\bplease\b/gi, /\bright now\b/gi, /\btoday\b/gi, /\bavailable\b/gi, /\bin nigeria\b/gi, /\bnear me\b/gi
+  /\bfor me\b/gi, /\bplease\b/gi, /\bright now\b/gi, /\btoday\b/gi, /\bavailable\b/gi, /\bin nigeria\b/gi, /\bnear me\b/gi,
+  /\bwith delivery this week\b/gi, /\bwith delivery\b/gi, /\bdelivery this week\b/gi, /\bthis week\b/gi,
+  /\bbrand new\b/gi, /\bbrand-new\b/gi,
+  /\bwith\b/gi, /\band\b/gi, /\bor\b/gi
 ];
 
 export function tokenize(text: string) {
