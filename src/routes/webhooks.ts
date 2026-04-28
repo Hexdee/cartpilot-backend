@@ -4,6 +4,7 @@ import { env } from "@/config/env";
 import { verifyHmacSignature } from "@/lib/signatures";
 import { ConversationService } from "@/services/conversations/conversation-service";
 import { HttpError } from "@/lib/http-error";
+import { logger } from "@/lib/logger";
 
 const telegramMessageSchema = z.object({
   update_id: z.number().optional(),
@@ -87,19 +88,19 @@ export function createWebhookRouter(conversationService: ConversationService) {
           message?.interactive?.button_reply?.id ?? message?.interactive?.list_reply?.id;
 
         if (sender && text) {
-          await conversationService.handleInboundMessage({
+          conversationService.handleInboundMessage({
             channel: "whatsapp",
             externalUserId: sender,
             displayName,
             message: text,
-          });
+          }).catch((error) => logger.error({ error }, "WhatsApp message handling failed"));
         } else if (sender && interactiveReplyId) {
-          await conversationService.handleChannelAction({
+          conversationService.handleChannelAction({
             channel: "whatsapp",
             externalUserId: sender,
             displayName,
             data: interactiveReplyId,
-          });
+          }).catch((error) => logger.error({ error }, "WhatsApp action handling failed"));
         }
       }
 
@@ -120,23 +121,23 @@ export function createWebhookRouter(conversationService: ConversationService) {
       const source = payload.message ?? payload.business_message;
 
       if (source?.chat.id && source.text) {
-        await conversationService.handleInboundMessage({
+        conversationService.handleInboundMessage({
           channel: "telegram",
           externalUserId: String(source.chat.id),
           displayName: source.chat.first_name,
           message: source.text,
-        });
+        }).catch((error) => logger.error({ error }, "Telegram message handling failed"));
       }
 
       if (payload.callback_query?.id && payload.callback_query.data && payload.callback_query.message?.chat.id) {
-        await conversationService.handleTelegramCallback({
+        conversationService.handleTelegramCallback({
           externalUserId: String(payload.callback_query.message.chat.id),
           displayName:
             payload.callback_query.from?.first_name ??
             payload.callback_query.message.chat.first_name,
           callbackQueryId: payload.callback_query.id,
           data: payload.callback_query.data,
-        });
+        }).catch((error) => logger.error({ error }, "Telegram callback handling failed"));
       }
 
       return response.status(200).json({ ok: true });

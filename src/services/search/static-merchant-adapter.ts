@@ -1,4 +1,4 @@
-import { getOfferSeed, seedSnapshotToRawOffer } from "@/domain/catalog";
+import { getOfferSeed, seedSnapshotToRawOffer } from "@/domain/demo-data";
 import { MerchantOfferSnapshot, MerchantSearchMode, MerchantSearchRequest } from "@/domain/types";
 import { MerchantAdapter, MerchantSearchResponse } from "@/services/search/merchant-adapter";
 

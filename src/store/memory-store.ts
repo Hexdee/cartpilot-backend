@@ -425,4 +425,12 @@ export class MemoryStore implements Store {
       transaction,
     };
   }
+
+  async getSearchCountToday(channel: ChannelType, externalId: string) {
+    const sessions = await this.listSearchSessionsForIdentity(channel, externalId);
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    return sessions.filter((session) => new Date(session.createdAt) >= startOfDay).length;
+  }
 }

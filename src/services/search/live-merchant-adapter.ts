@@ -1,9 +1,7 @@
 import { load } from "cheerio";
-import {
-  buildOfferId,
-  getOfferSeed,
-  seedSnapshotToRawOffer,
-} from "@/domain/catalog";
+import { env } from "@/config/env";
+import { buildOfferId } from "@/domain/catalog";
+import { getOfferSeed, seedSnapshotToRawOffer } from "@/domain/demo-data";
 import { renderSearchPageHtml } from "@/services/search/search-browser";
 import {
   MerchantRawOffer,
@@ -58,11 +56,13 @@ export abstract class LiveMerchantAdapter implements MerchantAdapter {
       });
 
       if (!response.ok) {
-        throw new Error(`${this.merchant} search returned HTTP ${response.status}`);
+        throw new Error("service unavailable, try again in an hour");
       }
 
       const html = await response.text();
       const offers = this.parseHtml(html, searchUrl, request);
+
+      console.log(`[Adapter:${this.merchant}] Found ${offers.length} offers at ${searchUrl}`);
 
       if (offers.length > 0) {
         return {
@@ -77,12 +77,27 @@ export abstract class LiveMerchantAdapter implements MerchantAdapter {
 
       const browserOffers = await this.tryBrowserAutomation(searchUrl, request, warnings);
       if (browserOffers.length > 0) {
+        console.log(`[Adapter:${this.merchant}] Found ${browserOffers.length} offers using browser fallback.`);
         warnings.push(`Used browser automation fallback for ${this.merchant}.`);
         return {
           merchant: this.merchant,
           mode: "live",
           query: request.query,
           offers: browserOffers,
+          warnings: warnings.length ? warnings : undefined,
+          searchUrl,
+        };
+      }
+
+      const remoteOffers = await this.tryRemoteFallback(request, warnings);
+      if (remoteOffers.length > 0) {
+        console.log(`[Adapter:${this.merchant}] Found ${remoteOffers.length} offers using remote fallback.`);
+        warnings.push(`Used remote fallback for ${this.merchant}.`);
+        return {
+          merchant: this.merchant,
+          mode: "live",
+          query: request.query,
+          offers: remoteOffers,
           warnings: warnings.length ? warnings : undefined,
           searchUrl,
         };
@@ -109,6 +124,7 @@ export abstract class LiveMerchantAdapter implements MerchantAdapter {
         searchUrl,
       };
     } catch (error) {
+
       if (this.mode === "hybrid") {
         const seed = this.createSeedResponse(request);
         return {
@@ -288,6 +304,40 @@ export abstract class LiveMerchantAdapter implements MerchantAdapter {
         error instanceof Error
           ? `Browser automation fallback failed for ${this.merchant}: ${error.message}`
           : `Browser automation fallback failed for ${this.merchant}.`,
+      );
+      return [];
+    }
+  }
+
+  private async tryRemoteFallback(request: MerchantSearchRequest, warnings: string[]): Promise<MerchantRawOffer[]> {
+    if (!env.REMOTE_FALLBACK_BASE_URL) {
+      return [];
+    }
+    
+    // Prevent infinite loop if the remote URL is pointing to itself
+    if (env.PUBLIC_BASE_URL === env.REMOTE_FALLBACK_BASE_URL) {
+      return [];
+    }
+
+    try {
+      const response = await fetch(`${env.REMOTE_FALLBACK_BASE_URL}/api/merchants/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ merchant: this.merchant, request }),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Remote API returned status ${response.status}`);
+      }
+
+      const data = await response.json() as MerchantSearchResponse;
+      return data.offers || [];
+    } catch (error) {
+      warnings.push(
+        error instanceof Error
+          ? `Remote fallback failed for ${this.merchant}: ${error.message}`
+          : `Remote fallback failed for ${this.merchant}.`,
       );
       return [];
     }

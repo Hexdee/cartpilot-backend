@@ -18,4 +18,5 @@ export interface AiProvider {
     rankedOffers: MerchantOfferSnapshot[],
   ): Promise<string>;
   summarizeOrderStatus(order: Order, trackingEvents: TrackingEvent[]): Promise<string>;
+  formatSearchRequest(query: string): Promise<string>;
 }

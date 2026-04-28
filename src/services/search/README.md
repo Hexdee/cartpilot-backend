@@ -22,6 +22,14 @@ Current adapters:
 
 - `JumiaMerchantAdapter`
 - `KongaMerchantAdapter`
+- `JijiMerchantAdapter`
+- `AliExpressMerchantAdapter`
+- `TemuMerchantAdapter`
+
+Runtime configuration:
+
+- `MERCHANT_SEARCH_MODE=seed|live|hybrid`
+- `MERCHANTS_ENABLED=jumia,konga,jiji,aliexpress,temu` (comma-separated)
 
 Current AI responsibilities:
 

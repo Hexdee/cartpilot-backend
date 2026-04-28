@@ -7,382 +7,7 @@ import {
   SearchIntent,
 } from "@/domain/types";
 
-interface ProductEntry {
-  key: ProductKey;
-  displayName: string;
-  aliases: string[];
-  searchTerms: string[];
-  requiredTerms?: string[];
-  rejectTerms?: string[];
-  followUp: string;
-}
 
-const productCatalog: Record<ProductKey, ProductEntry> = {
-  custom: {
-    key: "custom",
-    displayName: "Requested product",
-    aliases: [],
-    searchTerms: [],
-    rejectTerms: [],
-    followUp: "I can refine the shortlist further if you want a budget, brand, delivery speed, size, or seller preference.",
-  },
-  sony_wh1000xm5: {
-    key: "sony_wh1000xm5",
-    displayName: "Sony WH-1000XM5 headphones",
-    aliases: ["sony wh-1000xm5", "sony xm5", "xm5", "headphones", "noise-cancelling headphones", "headphone", "headset"],
-    searchTerms: ["sony", "wh-1000xm5", "1000xm5", "xm5", "headphone", "headphones", "headset"],
-    rejectTerms: ["blender", "chair", "fryer", "controller"],
-    followUp: "Would you like me to prioritize official stores only, or include trusted third-party sellers if they are cheaper?",
-  },
-  office_chair: {
-    key: "office_chair",
-    displayName: "Office chair with lumbar support",
-    aliases: ["office chair", "desk chair", "lumbar support chair", "chair", "ergonomic chair"],
-    searchTerms: ["office chair", "chair", "desk chair", "ergonomic", "lumbar"],
-    rejectTerms: ["headphone", "blender", "fryer", "controller"],
-    followUp: "Should I emphasize ergonomic comfort, rating, or the lowest delivered price?",
-  },
-  portable_blender: {
-    key: "portable_blender",
-    displayName: "Portable blender",
-    aliases: ["portable blender", "travel blender", "usb blender", "blender", "smoothie blender"],
-    searchTerms: ["blender", "portable", "usb", "rechargeable", "smoothie"],
-    requiredTerms: ["portable", "usb", "rechargeable", "smoothie", "juicer", "mini", "on-the-go"],
-    rejectTerms: ["headphone", "chair", "controller", "industrial", "crusher", "manual", "hand blender", "food processor"],
-    followUp: "Do you care more about portability, battery life, or getting the lowest total cost?",
-  },
-  ps5_controller: {
-    key: "ps5_controller",
-    displayName: "PS5 controller",
-    aliases: ["ps5 controller", "dualsense", "playstation controller", "controller", "gamepad"],
-    searchTerms: ["ps5", "dualsense", "controller", "gamepad", "playstation"],
-    rejectTerms: ["headphone", "blender", "chair", "fryer"],
-    followUp: "Should I keep the shortlist to official sellers only, or include reputable marketplace offers?",
-  },
-  air_fryer: {
-    key: "air_fryer",
-    displayName: "Air fryer",
-    aliases: ["air fryer", "airfryer", "fryer"],
-    searchTerms: ["air fryer", "airfryer", "fryer"],
-    rejectTerms: ["headphone", "blender", "chair", "controller"],
-    followUp: "Do you want the top result to optimize for warranty, rating, or the lowest landed cost?",
-  },
-};
-
-const stopWords = new Set([
-  "the",
-  "a",
-  "an",
-  "for",
-  "and",
-  "or",
-  "with",
-  "under",
-  "below",
-  "best",
-  "rated",
-  "fast",
-  "fastest",
-  "cheap",
-  "cheapest",
-  "deal",
-  "delivery",
-  "buy",
-  "find",
-  "need",
-  "want",
-  "please",
-  "naira",
-]);
-
-const conversationalPrefixPatterns = [
-  /^(?:please\s+)?(?:get|find|show|buy|search(?:\s+for)?|look(?:ing)?\s+for)\s+(?:me\s+)?/i,
-  /^(?:i\s+)?(?:need|want)\s+/i,
-  /^(?:can you|could you|help me)\s+/i,
-];
-
-const rankingPhrasePatterns = [
-  /\bbest deal for\b/gi,
-  /\bbest deal\b/gi,
-  /\bcheapest\b/gi,
-  /\blowest price\b/gi,
-  /\bbest rated\b/gi,
-  /\bhighest rated\b/gi,
-  /\bfastest delivery\b/gi,
-  /\bfast delivery\b/gi,
-  /\bdeliver(?:y)? quickly\b/gi,
-];
-
-const fillerPhrasePatterns = [
-  /\bfor me\b/gi,
-  /\bplease\b/gi,
-  /\bright now\b/gi,
-  /\btoday\b/gi,
-  /\bavailable\b/gi,
-  /\bin nigeria\b/gi,
-  /\bnear me\b/gi,
-];
-
-const accessoryRejectTerms = [
-  "case",
-  "cover",
-  "sleeve",
-  "skin",
-  "protector",
-  "keyboard cover",
-  "screen guard",
-  "screen protector",
-  "bag",
-  "pouch",
-  "shell",
-  "holder",
-  "stand",
-  "dock",
-  "charger",
-  "charging case",
-  "charging cable",
-  "cable",
-  "adapter",
-  "replacement",
-  "spare",
-  "accessory",
-  "strap",
-  "mount",
-  "remote cover",
-  "travel case",
-];
-
-const miniatureRejectTerms = [
-  "mini",
-  "tiny",
-  "pocket",
-  "handheld",
-  "desktop",
-  "desk",
-  "usb",
-  "humidifier",
-  "fan",
-  "toy",
-  "figurine",
-  "model",
-  "ornament",
-  "portable ac fan",
-  "air cooler",
-  "mini cooler",
-];
-
-const explicitAccessoryIntentTerms = [
-  "case",
-  "cover",
-  "sleeve",
-  "skin",
-  "protector",
-  "keyboard cover",
-  "screen guard",
-  "screen protector",
-  "bag",
-  "pouch",
-  "shell",
-  "accessory",
-  "charger",
-  "cable",
-  "adapter",
-  "replacement",
-  "spare",
-  "strap",
-  "mount",
-  "stand",
-  "dock",
-];
-
-const explicitMiniatureIntentTerms = [
-  "mini",
-  "tiny",
-  "pocket",
-  "handheld",
-  "usb",
-  "desktop",
-  "desk",
-  "portable",
-  "travel",
-];
-
-const largeApplianceTerms = [
-  "air conditioner",
-  "ac",
-  "refrigerator",
-  "fridge",
-  "freezer",
-  "washing machine",
-  "microwave",
-  "television",
-  "tv",
-];
-
-const seedOffers: Omit<MerchantOfferSnapshot, "totalCost">[] = [
-  {
-    id: "jumia-sony-wh1000xm5",
-    merchant: "Jumia",
-    merchantCategory: "live",
-    title: "Sony WH-1000XM5 Wireless Noise-Cancelling Headphones",
-    summary: "Fastest local delivery slot with an official merchant listing and strong customer confidence.",
-    sourceUrl: "https://www.jumia.com.ng/",
-    productKey: "sony_wh1000xm5",
-    price: 648000,
-    shippingCost: 15500,
-    rating: 4.8,
-    etaHours: 6,
-    etaLabel: "Today, 4:10 PM",
-    availability: "In stock",
-    officialStore: true,
-    color: "black",
-  },
-  {
-    id: "konga-sony-wh1000xm5",
-    merchant: "Konga",
-    merchantCategory: "live",
-    title: "Sony WH-1000XM5 Bluetooth Headphones - Black",
-    summary: "Lower total cost than Jumia, though the delivery window is slightly later.",
-    sourceUrl: "https://www.konga.com/",
-    productKey: "sony_wh1000xm5",
-    price: 639900,
-    shippingCost: 22000,
-    rating: 4.7,
-    etaHours: 6.2,
-    etaLabel: "Today, 4:22 PM",
-    availability: "In stock",
-    officialStore: false,
-    color: "black",
-  },
-  {
-    id: "jumia-office-chair",
-    merchant: "Jumia",
-    merchantCategory: "live",
-    title: "Ergonomic Office Chair with Adjustable Lumbar Support",
-    summary: "Fast local delivery with the strongest review mix in this shortlist.",
-    sourceUrl: "https://www.jumia.com.ng/",
-    productKey: "office_chair",
-    price: 231000,
-    shippingCost: 14500,
-    rating: 4.7,
-    etaHours: 14,
-    etaLabel: "Tomorrow, 9:00 AM",
-    availability: "In stock",
-    officialStore: false,
-  },
-  {
-    id: "konga-office-chair",
-    merchant: "Konga",
-    merchantCategory: "live",
-    title: "Mesh Office Chair with Headrest and Lumbar Support",
-    summary: "Lower total cost, though the delivery ETA trails the top option.",
-    sourceUrl: "https://www.konga.com/",
-    productKey: "office_chair",
-    price: 224000,
-    shippingCost: 12000,
-    rating: 4.6,
-    etaHours: 18,
-    etaLabel: "Tomorrow, 1:00 PM",
-    availability: "In stock",
-    officialStore: true,
-  },
-  {
-    id: "konga-portable-blender",
-    merchant: "Konga",
-    merchantCategory: "live",
-    title: "Portable USB Blender Bottle",
-    summary: "Strong local rating and a delivered price comfortably below target.",
-    sourceUrl: "https://www.konga.com/",
-    productKey: "portable_blender",
-    price: 33500,
-    shippingCost: 2500,
-    rating: 4.5,
-    etaHours: 7,
-    etaLabel: "Today, 5:00 PM",
-    availability: "In stock",
-    officialStore: false,
-  },
-  {
-    id: "jumia-portable-blender",
-    merchant: "Jumia",
-    merchantCategory: "live",
-    title: "Rechargeable Portable Blender Cup",
-    summary: "Fast dispatch and slightly better battery life than the alternative offer.",
-    sourceUrl: "https://www.jumia.com.ng/",
-    productKey: "portable_blender",
-    price: 34900,
-    shippingCost: 2000,
-    rating: 4.4,
-    etaHours: 6,
-    etaLabel: "Today, 4:00 PM",
-    availability: "In stock",
-    officialStore: false,
-  },
-  {
-    id: "jumia-ps5-controller",
-    merchant: "Jumia",
-    merchantCategory: "live",
-    title: "Sony DualSense Wireless Controller for PS5",
-    summary: "Fast local dispatch with the most reliable availability today.",
-    sourceUrl: "https://www.jumia.com.ng/",
-    productKey: "ps5_controller",
-    price: 79000,
-    shippingCost: 3500,
-    rating: 4.8,
-    etaHours: 5,
-    etaLabel: "Today, 3:30 PM",
-    availability: "In stock",
-    officialStore: true,
-  },
-  {
-    id: "konga-ps5-controller",
-    merchant: "Konga",
-    merchantCategory: "live",
-    title: "PS5 DualSense Controller Standard White",
-    summary: "Cheapest total cost, with a slightly lower seller confidence score.",
-    sourceUrl: "https://www.konga.com/",
-    productKey: "ps5_controller",
-    price: 76000,
-    shippingCost: 5000,
-    rating: 4.5,
-    etaHours: 8,
-    etaLabel: "Today, 6:00 PM",
-    availability: "In stock",
-    officialStore: false,
-  },
-  {
-    id: "jumia-air-fryer",
-    merchant: "Jumia",
-    merchantCategory: "live",
-    title: "8L Digital Air Fryer with Touch Control",
-    summary: "Strong local rating, fast dispatch, and a balanced delivered price.",
-    sourceUrl: "https://www.jumia.com.ng/",
-    productKey: "air_fryer",
-    price: 119000,
-    shippingCost: 6500,
-    rating: 4.6,
-    etaHours: 10,
-    etaLabel: "Today, 6:30 PM",
-    availability: "In stock",
-    officialStore: false,
-  },
-  {
-    id: "konga-air-fryer",
-    merchant: "Konga",
-    merchantCategory: "live",
-    title: "7L Rapid Air Fryer with 12-Month Warranty",
-    summary: "Warranty is strongest here, with a slightly slower arrival window.",
-    sourceUrl: "https://www.konga.com/",
-    productKey: "air_fryer",
-    price: 113000,
-    shippingCost: 9000,
-    rating: 4.5,
-    etaHours: 13,
-    etaLabel: "Tomorrow, 10:00 AM",
-    availability: "In stock",
-    officialStore: true,
-  },
-];
 
 export function parseMoney(rawValue: string): number {
   const sanitized = rawValue.replace(/[^\d.]/g, "");
@@ -499,19 +124,61 @@ export function extractSearchQuery(message: string): string {
   return query || message.trim();
 }
 
-export function detectProductKey(message: string): ProductKey {
-  const lower = extractSearchQuery(message).toLowerCase();
-  const entry = Object.values(productCatalog).find((candidate) =>
-    candidate.aliases.some((alias) => lower.includes(alias)),
-  );
-  return entry?.key ?? "custom";
+export function detectProductKey(_message: string): ProductKey {
+  return "custom";
 }
 
-export function getProductEntry(productKey: ProductKey): ProductEntry {
-  return productCatalog[productKey];
+export function getProductEntry(_productKey: ProductKey) {
+  return {
+    key: "custom",
+    displayName: "Requested product",
+    followUp: "I can refine the shortlist further if you want a budget, brand, delivery speed, size, or seller preference.",
+  };
 }
 
-function tokenize(text: string) {
+const stopWords = new Set([
+  "the", "a", "an", "for", "and", "or", "with", "under", "below", "best", "rated", "fast", "fastest", "cheap", "cheapest", "deal", "delivery", "buy", "find", "need", "want", "please", "naira"
+]);
+
+const accessoryRejectTerms = [
+  "case", "cover", "sleeve", "skin", "protector", "keyboard cover", "screen guard", "screen protector", "bag", "pouch", "shell", "holder", "stand", "dock", "charger", "charging case", "charging cable", "cable", "adapter", "replacement", "spare", "accessory", "strap", "mount", "remote cover", "travel case"
+];
+
+const miniatureRejectTerms = [
+  "mini", "tiny", "pocket", "handheld", "desktop", "desk", "usb", "humidifier", "fan", "toy", "figurine", "model", "ornament", "portable ac fan", "air cooler", "mini cooler"
+];
+
+const explicitAccessoryIntentTerms = [
+  "case", "cover", "sleeve", "skin", "protector", "keyboard cover", "screen guard", "screen protector", "bag", "pouch", "shell", "accessory", "charger", "cable", "adapter", "replacement", "spare", "strap", "mount", "stand", "dock"
+];
+
+const explicitMiniatureIntentTerms = [
+  "mini", "tiny", "pocket", "handheld", "usb", "desktop", "desk", "portable", "travel"
+];
+
+const largeApplianceTerms = [
+  "air conditioner", "ac", "refrigerator", "fridge", "freezer", "washing machine", "microwave", "television", "tv"
+];
+
+const conversationalPrefixPatterns = [
+  /^(?:please\s+)?(?:get|find|show|buy|search(?:\s+for)?|look(?:ing)?\s+for)\s+(?:me\s+)?/i,
+  /^(?:i\s+)?(?:need|want)\s+/i,
+  /^(?:can you|could you|help me)\s+/i,
+];
+
+const rankingPhrasePatterns = [
+  /\bbest deal for\b/gi, /\bbest deal\b/gi, /\bcheapest\b/gi, /\blowest price\b/gi, /\bbest rated\b/gi, /\bhighest rated\b/gi, /\bfastest delivery\b/gi, /\bfast delivery\b/gi, /\bdeliver(?:y)? quickly\b/gi,
+  /\bbrand new\b/gi, /\bbrand-new\b/gi
+];
+
+const fillerPhrasePatterns = [
+  /\bfor me\b/gi, /\bplease\b/gi, /\bright now\b/gi, /\btoday\b/gi, /\bavailable\b/gi, /\bin nigeria\b/gi, /\bnear me\b/gi,
+  /\bwith delivery this week\b/gi, /\bwith delivery\b/gi, /\bdelivery this week\b/gi, /\bthis week\b/gi,
+  /\bbrand new\b/gi, /\bbrand-new\b/gi,
+  /\bwith\b/gi, /\band\b/gi, /\bor\b/gi
+];
+
+export function tokenize(text: string) {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, " ")
@@ -611,23 +278,11 @@ function hasStrongCustomIntentMatch(intent: SearchIntent, haystack: string) {
 }
 
 export function getSearchTermsForIntent(intent: SearchIntent) {
-  const entry = getProductEntry(intent.productKey);
-  const queryTerms = tokenize(intent.query);
-  const aliasTerms = entry.searchTerms.flatMap((term) => tokenize(term));
-  return [...new Set([...aliasTerms, ...queryTerms])];
+  return tokenize(intent.query);
 }
 
 export function isRelevantMerchantText(intent: SearchIntent, text: string) {
   const haystack = text.toLowerCase();
-  const entry = getProductEntry(intent.productKey);
-  const terms = getSearchTermsForIntent(intent);
-  const positiveHits = terms.filter((term) => haystack.includes(term));
-  const requiredHits = (entry.requiredTerms ?? []).filter((term) => haystack.includes(term));
-  const rejectHits = (entry.rejectTerms ?? []).filter((term) => haystack.includes(term));
-
-  if (rejectHits.length > 0 && positiveHits.length < 2) {
-    return false;
-  }
 
   if (hasAccessoryMismatch(intent, haystack)) {
     return false;
@@ -637,19 +292,7 @@ export function isRelevantMerchantText(intent: SearchIntent, text: string) {
     return false;
   }
 
-  if (entry.requiredTerms?.length && requiredHits.length === 0) {
-    const exactAliasHit = entry.aliases.some((alias) => haystack.includes(alias.toLowerCase()));
-    if (!exactAliasHit) {
-      return false;
-    }
-  }
-
-  if (intent.productKey === "custom") {
-    return hasStrongCustomIntentMatch(intent, haystack);
-  }
-
-  const strongAliasHit = entry.aliases.some((alias) => haystack.includes(alias.toLowerCase()));
-  return strongAliasHit || positiveHits.length >= 2;
+  return hasStrongCustomIntentMatch(intent, haystack);
 }
 
 export function formatCurrency(amount: number): string {
@@ -660,38 +303,7 @@ export function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
-export function getOfferSeed(productKey: ProductKey): MerchantOfferSnapshot[] {
-  return seedOffers
-    .filter((offer) => offer.productKey === productKey)
-    .map((offer) => ({
-      ...offer,
-      totalCost: offer.price + offer.shippingCost,
-    }));
-}
 
-export function seedSnapshotToRawOffer(offer: MerchantOfferSnapshot): MerchantRawOffer {
-  return {
-    id: offer.id,
-    merchant: offer.merchant,
-    sourceUrl: offer.sourceUrl,
-    title: offer.title,
-    summary: offer.summary,
-    price: offer.price,
-    priceText: String(offer.price),
-    shippingCost: offer.shippingCost,
-    shippingText: String(offer.shippingCost),
-    rating: offer.rating,
-    ratingText: String(offer.rating),
-    etaHours: offer.etaHours,
-    etaText: offer.etaLabel,
-    availabilityText: offer.availability,
-    officialStore: offer.officialStore,
-    color: offer.color ?? null,
-    raw: {
-      source: "seed",
-    },
-  };
-}
 
 export function scoreOffer(offer: MerchantOfferSnapshot, mode: RankingMode): number {
   const deliveryScore = 1 / offer.etaHours;
